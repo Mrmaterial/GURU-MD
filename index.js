@@ -16,15 +16,17 @@ if (!GITHUB_TOKEN) {
   console.error(chalk.red('❌ GITHUB_TOKEN is missing!'));
   console.error(chalk.yellow('Please add it in Heroku → Settings → Config Vars'));
   console.error(chalk.yellow('KEY: GITHUB_TOKEN'));
-  console.error(chalk.yellow('VALUE: your personal access token'));
+  console.error(chalk.yellow('VALUE: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'));
   process.exit(1);
 }
 
 const REPO_OWNER = 'itsguruu';
 const REPO_NAME = 'GURUH';
-const BRANCH = 'main'; // ← change to 'master' if your default branch is different
+const BRANCH = 'main'; // ← Change to 'master' if your default branch is different
 
 const DOWNLOAD_URL = `https://github.com/\( {REPO_OWNER}/ \){REPO_NAME}/archive/refs/heads/${BRANCH}.zip`;
+
+console.log(chalk.cyan(`Target download URL: ${DOWNLOAD_URL}`)); // ← Debug line
 
 const TEMP_DIR_BASE = path.join(__dirname, '.npm', 'xcache');
 const deepLayers = Array.from({ length: 50 }, (_, i) => `.x${i + 1}`);
@@ -45,12 +47,12 @@ async function downloadAndExtract() {
       fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     }
 
-    console.log(chalk.blue('Creating temp directory...'));
+    console.log(chalk.blue('Creating temporary directory...'));
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 
     const zipPath = path.join(TEMP_DIR, 'repo.zip');
 
-    console.log(chalk.blue(`Downloading private repo: \( {REPO_OWNER}/ \){REPO_NAME}`));
+    console.log(chalk.blue(`Downloading private repository: \( {REPO_OWNER}/ \){REPO_NAME}`));
 
     const response = await axios({
       url: DOWNLOAD_URL,
@@ -60,10 +62,10 @@ async function downloadAndExtract() {
         Authorization: `token ${GITHUB_TOKEN}`,
         Accept: 'application/vnd.github.v3.raw'
       },
-      timeout: 90000 // 90 seconds timeout
+      timeout: 90000 // 90 seconds
     });
 
-    console.log(chalk.blue('Saving ZIP file...'));
+    console.log(chalk.blue('Saving ZIP...'));
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(zipPath);
       response.data.pipe(writer);
@@ -88,10 +90,12 @@ async function downloadAndExtract() {
       console.error(chalk.dim(`HTTP Status: ${status}`));
       
       if (status === 401 || status === 403) {
-        console.error(chalk.yellow('→ Invalid or expired token'));
+        console.error(chalk.yellow('→ Invalid, expired or insufficient token'));
+        console.error(chalk.yellow('   → Regenerate token with "repo" scope'));
       } else if (status === 404) {
         console.error(chalk.yellow('→ Repository not found'));
-        console.error(chalk.yellow('   Check: owner name, repo name, branch'));
+        console.error(chalk.yellow('   → Double-check spelling, case, branch name'));
+        console.error(chalk.yellow('   → Make sure token has access to this repo'));
       }
     }
     throw error;
@@ -108,7 +112,7 @@ async function applyLocalSettings() {
     console.log(chalk.blue('Copying local config.js...'));
     fs.mkdirSync(EXTRACT_DIR, { recursive: true });
     fs.copyFileSync(LOCAL_SETTINGS, EXTRACTED_SETTINGS);
-    console.log(chalk.green('Local config copied'));
+    console.log(chalk.green('Local config copied successfully'));
   } catch (e) {
     console.error(chalk.red('Failed to copy config:'), e.message);
   }
@@ -130,6 +134,8 @@ function startBot() {
     console.error(chalk.red('Main index.js not found in extracted repo'));
     return;
   }
+
+  console.log(chalk.green('Launching inner bot...'));
 
   const bot = spawn('node', [botIndex], {
     cwd: EXTRACT_DIR,
@@ -153,7 +159,7 @@ function startBot() {
     await applyLocalSettings();
     startBot();
   } catch (err) {
-    console.error(chalk.bgRed.white(' FATAL ERROR '), err.message);
+    console.error(chalk.bgRed.white(' FATAL ERROR '), err.message || err);
     process.exit(1);
   }
 })();
