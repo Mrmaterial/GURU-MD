@@ -1,165 +1,132 @@
-import fs from 'fs';
-import path from 'path';
-import axios from 'axios';
-import AdmZip from 'adm-zip';
-import { spawn } from 'child_process';
-import chalk from 'chalk';
-import { fileURLToPath } from 'url';
+
+import fs from "fs";
+import path from "path";
+import axios from "axios";
+import AdmZip from "adm-zip";
+import { spawn } from "child_process";
+import chalk from "chalk";
+import { fileURLToPath } from "url";
 
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const dirname = path.dirname(filename);
 
-// ── CONFIGURATION ───────────────────────────────────────────────
-const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+// === DEEP HIDDEN TEMP PATH (.npm/.botx_cache/.x1/.../.x90) ===
+const deepLayers = Array.from({ length: 50 }, (_, i) => .x${i + 1});
+const TEMP_DIR = path.join(__dirname, '.npm', 'xcache', ...deepLayers);
 
-if (!GITHUB_TOKEN) {
-  console.error(chalk.red('❌ GITHUB_TOKEN is missing!'));
-  console.error(chalk.yellow('Please add it in Heroku → Settings → Config Vars'));
-  console.error(chalk.yellow('KEY: GITHUB_TOKEN'));
-  console.error(chalk.yellow('VALUE: ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx'));
-  process.exit(1);
-}
+// === GIT CONFIG ===
+const DOWNLOAD_URL = "https://github.com///archive/refs/heads/main.zip";
+const EXTRACT_DIR = path.join(TEMP_DIR, "**-main");
+const LOCAL_SETTINGS = path.join(__dirname, "config.js");
+const EXTRACTED_SETTINGS = path.join(EXTRACT_DIR, "config.js");
 
-const REPO_OWNER = 'itsguruu';
-const REPO_NAME = 'GURUH';
-const BRANCH = 'main'; // ← Change to 'master' if your default branch is different
+// === HELPERS ===
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
 
-const DOWNLOAD_URL = `https://github.com/\( {REPO_OWNER}/ \){REPO_NAME}/archive/refs/heads/${BRANCH}.zip`;
-
-console.log(chalk.cyan(`Target download URL: ${DOWNLOAD_URL}`)); // ← Debug line
-
-const TEMP_DIR_BASE = path.join(__dirname, '.npm', 'xcache');
-const deepLayers = Array.from({ length: 50 }, (_, i) => `.x${i + 1}`);
-const TEMP_DIR = path.join(TEMP_DIR_BASE, ...deepLayers);
-
-const EXTRACT_DIR = path.join(TEMP_DIR, `\( {REPO_NAME}- \){BRANCH}`);
-const LOCAL_SETTINGS = path.join(__dirname, 'config.js');
-const EXTRACTED_SETTINGS = path.join(EXTRACT_DIR, 'config.js');
-
-// ── HELPERS ─────────────────────────────────────────────────────
-const delay = ms => new Promise(res => setTimeout(res, ms));
-
-// ── MAIN FUNCTIONS ──────────────────────────────────────────────
+// === MAIN LOGIC ===
 async function downloadAndExtract() {
   try {
     if (fs.existsSync(TEMP_DIR)) {
-      console.log(chalk.yellow('🧹 Cleaning old cache...'));
+      console.log(chalk.yellow("🧹 Cleaning previous cache..."));
       fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     }
 
-    console.log(chalk.blue('Creating temporary directory...'));
     fs.mkdirSync(TEMP_DIR, { recursive: true });
 
-    const zipPath = path.join(TEMP_DIR, 'repo.zip');
+    const zipPath = path.join(TEMP_DIR, "repo.zip");
 
-    console.log(chalk.blue(`Downloading private repository: \( {REPO_OWNER}/ \){REPO_NAME}`));
-
+    console.log(chalk.blue("⬇️ Connecting to space..."));
     const response = await axios({
       url: DOWNLOAD_URL,
-      method: 'GET',
-      responseType: 'stream',
-      headers: {
-        Authorization: `token ${GITHUB_TOKEN}`,
-        Accept: 'application/vnd.github.v3.raw'
-      },
-      timeout: 90000 // 90 seconds
+      method: "GET",
+      responseType: "stream",
+      // Note: GITHUB_TOKEN removed, so authentication is no longer included
     });
 
-    console.log(chalk.blue('Saving ZIP...'));
     await new Promise((resolve, reject) => {
       const writer = fs.createWriteStream(zipPath);
       response.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
+      writer.on("finish", resolve);
+      writer.on("error", reject);
     });
 
-    console.log(chalk.green('ZIP downloaded successfully'));
-
-    console.log(chalk.blue('Extracting ZIP...'));
-    new AdmZip(zipPath).extractAllTo(TEMP_DIR, true);
-
-    console.log(chalk.green('Extraction complete'));
-
-    // Cleanup
-    if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath);
-  } catch (error) {
-    console.error(chalk.red('Download/Extract failed:'), error.message);
-    
-    if (error.response) {
-      const status = error.response.status;
-      console.error(chalk.dim(`HTTP Status: ${status}`));
-      
-      if (status === 401 || status === 403) {
-        console.error(chalk.yellow('→ Invalid, expired or insufficient token'));
-        console.error(chalk.yellow('   → Regenerate token with "repo" scope'));
-      } else if (status === 404) {
-        console.error(chalk.yellow('→ Repository not found'));
-        console.error(chalk.yellow('   → Double-check spelling, case, branch name'));
-        console.error(chalk.yellow('   → Make sure token has access to this repo'));
+    console.log(chalk.green("📦 ZIP download complete."));
+    try {
+      new AdmZip(zipPath).extractAllTo(TEMP_DIR, true);
+    } catch (e) {
+      console.error(chalk.red("❌ Failed to extract ZIP:"), e);
+      throw e;
+    } finally {
+      if (fs.existsSync(zipPath)) {
+        fs.unlinkSync(zipPath);
       }
     }
-    throw error;
+
+    const pluginFolder = path.join(EXTRACT_DIR, "plugins");
+    if (fs.existsSync(pluginFolder)) {
+      console.log(chalk.green("✅ Plugins folder found."));
+    } else {
+      console.log(chalk.red("❌ Plugin folder not found."));
+    }
+  } catch (e) {
+    console.error(chalk.red("❌ Download/Extract failed:"), e);
+    throw e;
   }
 }
 
 async function applyLocalSettings() {
   if (!fs.existsSync(LOCAL_SETTINGS)) {
-    console.log(chalk.yellow('No local config.js found → skipping'));
+    console.log(chalk.yellow("⚠️ No local settings file found."));
     return;
   }
 
   try {
-    console.log(chalk.blue('Copying local config.js...'));
+    // Ensure EXTRACT_DIR exists before copying
     fs.mkdirSync(EXTRACT_DIR, { recursive: true });
     fs.copyFileSync(LOCAL_SETTINGS, EXTRACTED_SETTINGS);
-    console.log(chalk.green('Local config copied successfully'));
+    console.log(chalk.green("🛠️ Local settings applied."));
   } catch (e) {
-    console.error(chalk.red('Failed to copy config:'), e.message);
+    console.error(chalk.red("❌ Failed to apply local settings:"), e);
   }
 
-  await delay(800);
+  await delay(500);
 }
 
 function startBot() {
-  console.log(chalk.cyan('Starting bot from extracted files...'));
-
+  console.log(chalk.cyan("🚀 Launching bot instance..."));
   if (!fs.existsSync(EXTRACT_DIR)) {
-    console.error(chalk.red('Extracted directory not found'));
+    console.error(chalk.red("❌ Extracted directory not found. Cannot start bot."));
     return;
   }
 
-  const botIndex = path.join(EXTRACT_DIR, 'index.js');
-
-  if (!fs.existsSync(botIndex)) {
-    console.error(chalk.red('Main index.js not found in extracted repo'));
+  if (!fs.existsSync(path.join(EXTRACT_DIR, "index.js"))) {
+    console.error(chalk.red("❌ index.js not found in extracted directory."));
     return;
   }
 
-  console.log(chalk.green('Launching inner bot...'));
-
-  const bot = spawn('node', [botIndex], {
+  const bot = spawn("node", ["index.js"], {
     cwd: EXTRACT_DIR,
-    stdio: 'inherit',
-    env: { ...process.env, NODE_ENV: 'production' }
+    stdio: "inherit",
+    env: { ...process.env, NODE_ENV: "production" },
   });
 
-  bot.on('close', code => {
-    console.log(chalk.red(`Bot exited with code ${code}`));
+  bot.on("close", (code) => {
+    console.log(chalk.red(💥 Bot terminated with exit code: ${code}));
   });
 
-  bot.on('error', err => {
-    console.error(chalk.red('Failed to start bot:'), err.message);
+  bot.on("error", (err) => {
+    console.error(chalk.red("❌ Bot failed to start:"), err);
   });
 }
 
-// ── EXECUTION ───────────────────────────────────────────────────
+// === RUN ===
 (async () => {
   try {
     await downloadAndExtract();
     await applyLocalSettings();
     startBot();
-  } catch (err) {
-    console.error(chalk.bgRed.white(' FATAL ERROR '), err.message || err);
+  } catch (e) {
+    console.error(chalk.red("❌ Fatal error in main execution:"), e);
     process.exit(1);
   }
 })();
